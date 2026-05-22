@@ -6,24 +6,13 @@ const { exchangeGithubCodeForToken, fetchGithubUserEmailProfile } = require('../
 const router = express.Router();
 
 // Initialize Firebase Admin SDK
-// For development: using minimal config (only projectId needed for token verification)
-// For production: use service account JSON file
 if (!admin.apps.length) {
   try {
-    // Try to initialize with service account if available
-    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-      });
-      console.log('✅ Firebase Admin initialized with service account');
-    } else {
-      // Fallback: Initialize with minimal config for token verification
-      admin.initializeApp({
-        projectId: process.env.FIREBASE_PROJECT_ID || 'swiftbodia'
-      });
-      console.log('✅ Firebase Admin initialized with project ID');
-    }
+    // Initialize with project ID for token verification
+    admin.initializeApp({
+      projectId: process.env.FIREBASE_PROJECT_ID || 'swiftbodia'
+    });
+    console.log('✅ Firebase Admin initialized');
   } catch (error) {
     console.error('❌ Firebase Admin initialization error:', error.message);
   }
@@ -48,7 +37,7 @@ router.post('/google', async (req, res) => {
     // Create or update user in database
     const user = await upsertOAuthUser({
       email,
-      name: decodedToken.name || decodedToken.display_name || null,
+      name: decodedToken.name || null,
       profileImageUrl: decodedToken.picture || null
     });
 
