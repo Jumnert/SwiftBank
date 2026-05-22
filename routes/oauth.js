@@ -1,36 +1,60 @@
 const express = require('express');
-const { OAuth2Client } = require('google-auth-library');
+const admin = require('firebase-admin');
 const { upsertOAuthUser, signToken } = require('../utils/oauth');
 const { exchangeGithubCodeForToken, fetchGithubUserEmailProfile } = require('../utils/github');
 
 const router = express.Router();
 
-// Google native sign-in: Android obtains an ID token and sends it here.
+// Initialize Firebase Admin SDK
+// For development: using minimal config (only projectId needed for token verification)
+// For production: use service account JSON file
+if (!admin.apps.length) {
+  try {
+    // Try to initialize with service account if available
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+      });
+      console.log('✅ Firebase Admin initialized with service account');
+    } else {
+      // Fallback: Initialize with minimal config for token verification
+      admin.initializeApp({
+        projectId: process.env.FIREBASE_PROJECT_ID || 'swiftbodia'
+      });
+      console.log('✅ Firebase Admin initialized with project ID');
+    }
+  } catch (error) {
+    console.error('❌ Firebase Admin initialization error:', error.message);
+  }
+}
+
+// Google Firebase OAuth: Android sends Firebase ID token
 router.post('/google', async (req, res) => {
   try {
     const { idToken } = req.body;
     if (!idToken) return res.status(400).json({ error: 'idToken is required' });
-    if (!process.env.GOOGLE_WEB_CLIENT_ID) {
-      return res.status(500).json({ error: 'Google OAuth is not configured' });
+
+    // Verify Firebase ID token
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const email = decodedToken.email;
+    
+    if (!email) {
+      return res.status(400).json({ error: 'Firebase token has no email' });
     }
 
-    const client = new OAuth2Client(process.env.GOOGLE_WEB_CLIENT_ID);
-    const ticket = await client.verifyIdToken({
-      idToken,
-      audience: process.env.GOOGLE_WEB_CLIENT_ID
-    });
+    console.log('✅ Firebase token verified for:', email);
 
-    const payload = ticket.getPayload();
-    const email = payload?.email;
-    if (!email) return res.status(400).json({ error: 'Google account has no email' });
-
+    // Create or update user in database
     const user = await upsertOAuthUser({
       email,
-      name: payload?.name || payload?.given_name || null,
-      profileImageUrl: payload?.picture || null
+      name: decodedToken.name || decodedToken.display_name || null,
+      profileImageUrl: decodedToken.picture || null
     });
 
+    // Generate your own JWT token
     const token = signToken(user);
+    
     res.json({
       message: 'Login successful',
       token,
@@ -43,8 +67,8 @@ router.post('/google', async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('Google OAuth error:', err);
-    res.status(500).json({ error: 'Google OAuth failed' });
+    console.error('❌ Firebase OAuth error:', err);
+    res.status(500).json({ error: 'Firebase OAuth failed: ' + err.message });
   }
 });
 
