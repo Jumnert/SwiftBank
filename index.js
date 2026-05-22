@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const authRoutes = require('./routes/auth');
+const oauthRoutes = require('./routes/oauth');
 const userRoutes = require('./routes/user');
 const { initializeDatabase } = require('./db/database');
 
@@ -19,6 +20,7 @@ initializeDatabase().catch(err => {
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/auth', oauthRoutes);
 app.use('/api/user', userRoutes);
 
 // Health check
