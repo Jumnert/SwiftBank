@@ -22,7 +22,7 @@ const initializeDatabase = async () => {
         email VARCHAR(255) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
         name VARCHAR(255),
-        balance DECIMAL(10, 2) DEFAULT 10.00,
+        balance DECIMAL(10, 2) DEFAULT 200.00,
         profile_image_url VARCHAR(500),
         is_verified BOOLEAN DEFAULT FALSE,
         verification_token VARCHAR(255),

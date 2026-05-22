@@ -73,10 +73,10 @@ router.post('/verify-email', async (req, res) => {
       return res.status(400).json({ error: 'Invalid OTP' });
     }
 
-    // Create user
+    // Create user with $200 starting balance
     const result = await query(
-      'INSERT INTO users (email, password, name, is_verified, balance) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, name',
-      [email, storedData.password, storedData.name, true, 10.00]
+      'INSERT INTO users (email, password, name, is_verified, balance) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, name, balance',
+      [email, storedData.password, storedData.name, true, 200.00]
     );
 
     const user = result.rows[0];
@@ -93,9 +93,10 @@ router.post('/verify-email', async (req, res) => {
       message: 'Email verified successfully',
       token,
       user: {
-        id: user.id,
+        id: String(user.id),
         email: user.email,
-        name: user.name
+        name: user.name,
+        balance: Number(user.balance ?? 200)
       }
     });
   } catch (err) {
@@ -140,10 +141,10 @@ router.post('/login', async (req, res) => {
       message: 'Login successful',
       token,
       user: {
-        id: user.id,
+        id: String(user.id),
         email: user.email,
         name: user.name,
-        balance: user.balance,
+        balance: Number(user.balance),
         profile_image_url: user.profile_image_url
       }
     });

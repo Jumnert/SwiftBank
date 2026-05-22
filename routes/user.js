@@ -5,6 +5,17 @@ const { uploadProfileImage } = require('../utils/cloudinary');
 
 const router = express.Router();
 
+const mapTransaction = (row) => ({
+  id: String(row.id),
+  user_id: String(row.user_id),
+  type: row.type,
+  amount: Number(row.amount),
+  recipient_email: row.recipient_email,
+  description: row.description,
+  status: row.status,
+  created_at: row.created_at
+});
+
 // Get user profile
 router.get('/profile', verifyToken, async (req, res) => {
   try {
@@ -17,7 +28,15 @@ router.get('/profile', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json(result.rows[0]);
+    const row = result.rows[0];
+    res.json({
+      id: String(row.id),
+      email: row.email,
+      name: row.name,
+      balance: Number(row.balance),
+      profile_image_url: row.profile_image_url,
+      created_at: row.created_at
+    });
   } catch (err) {
     console.error('Get profile error:', err);
     res.status(500).json({ error: 'Failed to get profile' });
@@ -34,7 +53,14 @@ router.put('/profile', verifyToken, async (req, res) => {
       [name, req.userId]
     );
 
-    res.json(result.rows[0]);
+    const row = result.rows[0];
+    res.json({
+      id: String(row.id),
+      email: row.email,
+      name: row.name,
+      balance: Number(row.balance),
+      profile_image_url: row.profile_image_url
+    });
   } catch (err) {
     console.error('Update profile error:', err);
     res.status(500).json({ error: 'Failed to update profile' });
@@ -94,7 +120,7 @@ router.get('/transactions', verifyToken, async (req, res) => {
       [req.userId]
     );
 
-    res.json(result.rows);
+    res.json(result.rows.map(mapTransaction));
   } catch (err) {
     console.error('Get transactions error:', err);
     res.status(500).json({ error: 'Failed to get transactions' });
@@ -126,7 +152,7 @@ router.get('/transactions/:period', verifyToken, async (req, res) => {
       [req.userId]
     );
 
-    res.json(result.rows);
+    res.json(result.rows.map(mapTransaction));
   } catch (err) {
     console.error('Get transactions error:', err);
     res.status(500).json({ error: 'Failed to get transactions' });
@@ -186,9 +212,11 @@ router.delete('/favorites/:id', verifyToken, async (req, res) => {
 // Transfer money
 router.post('/transfer', verifyToken, async (req, res) => {
   try {
-    const { recipient_email, amount, description } = req.body;
+    const recipient_email = (req.body.recipient_email || '').trim().toLowerCase();
+    const amount = parseFloat(req.body.amount);
+    const description = req.body.description;
 
-    if (!recipient_email || !amount) {
+    if (!recipient_email || Number.isNaN(amount)) {
       return res.status(400).json({ error: 'Recipient email and amount are required' });
     }
 
@@ -211,6 +239,11 @@ router.post('/transfer', verifyToken, async (req, res) => {
 
     const sender = senderResult.rows[0];
     const senderBalance = parseFloat(sender.balance);
+
+    if (sender.email.toLowerCase() === recipient_email) {
+      await query('ROLLBACK');
+      return res.status(400).json({ error: 'Cannot send money to yourself' });
+    }
     
     if (senderBalance < amount) {
       await query('ROLLBACK');
@@ -219,7 +252,7 @@ router.post('/transfer', verifyToken, async (req, res) => {
 
     // Get recipient info
     const recipientResult = await query(
-      'SELECT id, email, name, fcm_token FROM users WHERE email = $1',
+      'SELECT id, email, name, fcm_token FROM users WHERE LOWER(email) = $1',
       [recipient_email]
     );
     if (recipientResult.rows.length === 0) {
