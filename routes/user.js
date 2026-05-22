@@ -196,47 +196,116 @@ router.post('/transfer', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'Amount must be greater than 0' });
     }
 
-    // Get sender's balance
-    const senderResult = await query('SELECT balance FROM users WHERE id = $1', [req.userId]);
+    // Start transaction
+    await query('BEGIN');
+
+    // Get sender info
+    const senderResult = await query(
+      'SELECT id, email, name, balance, fcm_token FROM users WHERE id = $1',
+      [req.userId]
+    );
     if (senderResult.rows.length === 0) {
+      await query('ROLLBACK');
       return res.status(404).json({ error: 'User not found' });
     }
 
-    const senderBalance = parseFloat(senderResult.rows[0].balance);
+    const sender = senderResult.rows[0];
+    const senderBalance = parseFloat(sender.balance);
+    
     if (senderBalance < amount) {
+      await query('ROLLBACK');
       return res.status(400).json({ error: 'Insufficient balance' });
     }
 
-    // Get recipient
-    const recipientResult = await query('SELECT id FROM users WHERE email = $1', [recipient_email]);
+    // Get recipient info
+    const recipientResult = await query(
+      'SELECT id, email, name, fcm_token FROM users WHERE email = $1',
+      [recipient_email]
+    );
     if (recipientResult.rows.length === 0) {
+      await query('ROLLBACK');
       return res.status(400).json({ error: 'Recipient not found' });
     }
 
-    const recipientId = recipientResult.rows[0].id;
+    const recipient = recipientResult.rows[0];
 
     // Deduct from sender
-    await query('UPDATE users SET balance = balance - $1 WHERE id = $2', [amount, req.userId]);
+    await query('UPDATE users SET balance = balance - $1 WHERE id = $2', [amount, sender.id]);
 
     // Add to recipient
-    await query('UPDATE users SET balance = balance + $1 WHERE id = $2', [amount, recipientId]);
+    await query('UPDATE users SET balance = balance + $1 WHERE id = $2', [amount, recipient.id]);
 
     // Record transaction for sender
     await query(
       'INSERT INTO transactions (user_id, type, amount, recipient_email, description) VALUES ($1, $2, $3, $4, $5)',
-      [req.userId, 'transfer_out', amount, recipient_email, description]
+      [sender.id, 'transfer_out', amount, recipient_email, description || 'QR Payment']
     );
 
     // Record transaction for recipient
     await query(
       'INSERT INTO transactions (user_id, type, amount, recipient_email, description) VALUES ($1, $2, $3, $4, $5)',
-      [recipientId, 'transfer_in', amount, req.userEmail, description]
+      [recipient.id, 'transfer_in', amount, sender.email, description || 'QR Payment']
     );
+
+    await query('COMMIT');
+
+    // Send push notifications
+    const { sendPushNotification } = require('../utils/notifications');
+    
+    // Notify recipient
+    if (recipient.fcm_token) {
+      await sendPushNotification(recipient.fcm_token, {
+        title: '💰 Money Received',
+        body: `You received $${parseFloat(amount).toFixed(2)} from ${sender.name || sender.email}`,
+        data: {
+          type: 'payment_received',
+          amount: amount.toString(),
+          from: sender.email,
+          fromName: sender.name || sender.email
+        }
+      });
+    }
+
+    // Notify sender
+    if (sender.fcm_token) {
+      await sendPushNotification(sender.fcm_token, {
+        title: '✅ Payment Sent',
+        body: `You sent $${parseFloat(amount).toFixed(2)} to ${recipient.name || recipient.email}`,
+        data: {
+          type: 'payment_sent',
+          amount: amount.toString(),
+          to: recipient.email,
+          toName: recipient.name || recipient.email
+        }
+      });
+    }
 
     res.json({ message: 'Transfer successful' });
   } catch (err) {
+    await query('ROLLBACK');
     console.error('Transfer error:', err);
     res.status(500).json({ error: 'Transfer failed' });
+  }
+});
+
+// Save FCM token
+router.post('/fcm-token', verifyToken, async (req, res) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({ error: 'Token is required' });
+    }
+
+    await query(
+      'UPDATE users SET fcm_token = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [token, req.userId]
+    );
+
+    res.json({ message: 'FCM token saved successfully' });
+  } catch (err) {
+    console.error('Save FCM token error:', err);
+    res.status(500).json({ error: 'Failed to save FCM token' });
   }
 });
 
