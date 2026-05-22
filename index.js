@@ -5,12 +5,16 @@ const authRoutes = require('./routes/auth');
 const oauthRoutes = require('./routes/oauth');
 const userRoutes = require('./routes/user');
 const { initializeDatabase } = require('./db/database');
+const { initializeFirebaseAdmin } = require('./utils/firebaseAdmin');
 
 const app = express();
 
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Initialize Firebase (push + token verify)
+initializeFirebaseAdmin();
 
 // Initialize database
 initializeDatabase().catch(err => {

@@ -60,6 +60,12 @@ const initializeDatabase = async () => {
       );
     `);
 
+    // Push notifications
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS fcm_token TEXT`);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_users_fcm_token ON users(fcm_token)
+    `);
+
     console.log('Database initialized successfully');
     client.release();
   } catch (err) {

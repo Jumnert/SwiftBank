@@ -1,22 +1,11 @@
 const express = require('express');
-const admin = require('firebase-admin');
+const { admin, initializeFirebaseAdmin } = require('../utils/firebaseAdmin');
 const { upsertOAuthUser, signToken } = require('../utils/oauth');
 const { exchangeGithubCodeForToken, fetchGithubUserEmailProfile } = require('../utils/github');
 
 const router = express.Router();
 
-// Initialize Firebase Admin SDK
-if (!admin.apps.length) {
-  try {
-    // Initialize with project ID for token verification
-    admin.initializeApp({
-      projectId: process.env.FIREBASE_PROJECT_ID || 'swiftbodia'
-    });
-    console.log('✅ Firebase Admin initialized');
-  } catch (error) {
-    console.error('❌ Firebase Admin initialization error:', error.message);
-  }
-}
+initializeFirebaseAdmin();
 
 // Google Firebase OAuth: Android sends Firebase ID token
 router.post('/google', async (req, res) => {

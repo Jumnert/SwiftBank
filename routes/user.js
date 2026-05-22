@@ -282,13 +282,12 @@ router.post('/transfer', verifyToken, async (req, res) => {
 
     await query('COMMIT');
 
-    // Send push notifications
+    // Push notifications (non-blocking — transfer still succeeds if push fails)
     const { sendPushNotification } = require('../utils/notifications');
-    
-    // Notify recipient
+
     if (recipient.fcm_token) {
-      await sendPushNotification(recipient.fcm_token, {
-        title: '💰 Money Received',
+      sendPushNotification(recipient.fcm_token, {
+        title: 'Money Received',
         body: `You received $${parseFloat(amount).toFixed(2)} from ${sender.name || sender.email}`,
         data: {
           type: 'payment_received',
@@ -296,13 +295,14 @@ router.post('/transfer', verifyToken, async (req, res) => {
           from: sender.email,
           fromName: sender.name || sender.email
         }
-      });
+      }).catch((err) => console.error('Recipient push failed:', err.message));
+    } else {
+      console.log('⚠️  Recipient has no FCM token — open app while logged in to register');
     }
 
-    // Notify sender
     if (sender.fcm_token) {
-      await sendPushNotification(sender.fcm_token, {
-        title: '✅ Payment Sent',
+      sendPushNotification(sender.fcm_token, {
+        title: 'Payment Sent',
         body: `You sent $${parseFloat(amount).toFixed(2)} to ${recipient.name || recipient.email}`,
         data: {
           type: 'payment_sent',
@@ -310,7 +310,7 @@ router.post('/transfer', verifyToken, async (req, res) => {
           to: recipient.email,
           toName: recipient.name || recipient.email
         }
-      });
+      }).catch((err) => console.error('Sender push failed:', err.message));
     }
 
     res.json({ message: 'Transfer successful' });
