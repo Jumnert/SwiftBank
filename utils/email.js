@@ -28,6 +28,8 @@ async function sendMail(to, subject, html, retryCount = 0) {
   try {
     console.log(`[EMAIL] Sending to ${to} via Resend (attempt ${retryCount + 1}/${MAX_RETRIES + 1})`);
     
+    // Use your verified email as sender (chountheachumnith@gmail.com)
+    // Note: Resend free tier only allows sending to your own email until you verify a domain
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
@@ -35,7 +37,7 @@ async function sendMail(to, subject, html, retryCount = 0) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        from: 'SwiftBodia <onboarding@resend.dev>',
+        from: 'SwiftBodia <chountheachumnith@gmail.com>',
         to: to,
         subject: subject,
         html: html
