@@ -1,29 +1,23 @@
 require('dotenv').config();
-const nodemailer = require('nodemailer');
+const { getSmtpCredentials, sendVerificationEmail } = require('./utils/email');
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_PASSWORD
-  }
-});
+const { user, pass } = getSmtpCredentials();
 
 console.log('Testing email with:');
-console.log('User:', process.env.GMAIL_USER);
-console.log('Password length:', process.env.GMAIL_PASSWORD?.length);
+console.log('User:', user || '(not set)');
+console.log('Password length:', pass ? pass.length : 0);
 
-transporter.sendMail({
-  from: process.env.GMAIL_USER,
-  to: 'test@example.com',
-  subject: 'Test Email',
-  text: 'This is a test email'
-}, (err, info) => {
-  if (err) {
-    console.error('Email error:', err.message);
-    process.exit(1);
-  } else {
-    console.log('Email sent successfully:', info.response);
+if (!user || !pass) {
+  console.error('Set GMAIL_USER/GMAIL_PASSWORD or SMTP_USER/SMTP_PASS in .env');
+  process.exit(1);
+}
+
+sendVerificationEmail('test@example.com', '123456').then((ok) => {
+  if (ok) {
+    console.log('Email sent successfully');
     process.exit(0);
+  } else {
+    console.error('Email send failed');
+    process.exit(1);
   }
 });
