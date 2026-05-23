@@ -1,6 +1,7 @@
 const nodemailer = require('nodemailer');
 
 const SMTP_TIMEOUT_MS = 15000;
+const MAX_RETRIES = 2;
 
 /** Render docs use SMTP_*; local .env uses GMAIL_* — support both. */
 function getSmtpCredentials() {
@@ -19,7 +20,13 @@ function createTransporter() {
     auth: { user, pass },
     connectionTimeout: SMTP_TIMEOUT_MS,
     greetingTimeout: SMTP_TIMEOUT_MS,
-    socketTimeout: SMTP_TIMEOUT_MS
+    socketTimeout: SMTP_TIMEOUT_MS,
+    pool: {
+      maxConnections: 1,
+      maxMessages: 5,
+      rateDelta: 2000,
+      rateLimit: 5
+    }
   });
 }
 
@@ -41,25 +48,51 @@ function withTimeout(promise, ms, label) {
   ]);
 }
 
-async function sendMail(to, subject, html) {
+async function sendMail(to, subject, html, retryCount = 0) {
   const { user } = getSmtpCredentials();
   const transport = getTransporter();
+  
   if (!transport) {
     console.error(
-      'Email not configured: set GMAIL_USER and GMAIL_PASSWORD (or SMTP_USER and SMTP_PASS)'
+      'Email not configured: set GMAIL_USER and GMAIL_PASSWORD (or SMTP_USER and SMTP_PASS) in .env'
     );
     return false;
   }
 
   try {
+    console.log(`[EMAIL] Sending to ${to} (attempt ${retryCount + 1}/${MAX_RETRIES + 1})`);
+    
     await withTimeout(
       transport.sendMail({ from: user, to, subject, html }),
       SMTP_TIMEOUT_MS,
       'SMTP send'
     );
+    console.log(`[EMAIL] ✅ Email sent successfully to ${to}`);
     return true;
   } catch (err) {
-    console.error('Error sending email:', err.message);
+    console.error(`[EMAIL] ❌ Error sending email to ${to} (attempt ${retryCount + 1}):`, err.message);
+    
+    // Retry on network/timeout errors
+    if (retryCount < MAX_RETRIES && (
+      err.message.includes('timeout') || 
+      err.message.includes('ECONNREFUSED') ||
+      err.message.includes('EHOSTUNREACH') ||
+      err.message.includes('ETIMEDOUT')
+    )) {
+      console.log(`[EMAIL] 🔄 Retrying email send to ${to}...`);
+      // Reset transporter on retry
+      transporter = undefined;
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return sendMail(to, subject, html, retryCount + 1);
+    }
+    
+    // Log detailed error for debugging
+    if (err.message.includes('Invalid login') || err.message.includes('535')) {
+      console.error('[EMAIL] 🔐 AUTHENTICATION ERROR: Check GMAIL_USER and GMAIL_PASSWORD');
+      console.error('[EMAIL] Make sure you are using an App Password, not your regular Gmail password');
+      console.error('[EMAIL] Generate one at: https://myaccount.google.com/apppasswords');
+    }
+    
     return false;
   }
 }

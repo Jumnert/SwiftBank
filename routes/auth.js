@@ -31,14 +31,22 @@ router.post('/register', async (req, res) => {
     const otp = generateOTP();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
+    console.log(`[REGISTER] Attempting to send verification email to: ${email}`);
+
     // Send verification email
     const emailSent = await sendVerificationEmail(email, otp);
+    
+    console.log(`[REGISTER] Email send result: ${emailSent ? 'SUCCESS' : 'FAILED'}`);
+    
     if (!emailSent) {
+      console.error(`[REGISTER] Failed to send verification email to ${email}`);
       return res.status(500).json({ error: 'Failed to send verification email' });
     }
 
     // Store OTP temporarily
     otpStore.set(email, { otp, expires: otpExpires, password: hashedPassword, name });
+
+    console.log(`[REGISTER] OTP stored for ${email}, waiting for verification`);
 
     res.json({
       message: 'Verification code sent to your email',
