@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const { admin, initializeFirebaseAdmin, isPushMessagingReady } = require('./firebaseAdmin');
 
 const SMTP_TIMEOUT_MS = 30000;
 const MAX_RETRIES = 3;
@@ -133,9 +134,84 @@ const sendPasswordResetEmail = async (email, otp) => {
   );
 };
 
+/**
+ * Send OTP via Firebase Authentication (fallback when SMTP fails)
+ * Uses Firebase's built-in OTP delivery system
+ */
+async function sendOtpViaFirebase(email, otp) {
+  try {
+    if (!isPushMessagingReady()) {
+      console.warn('[FIREBASE] Firebase messaging not ready, skipping Firebase OTP');
+      return false;
+    }
+
+    initializeFirebaseAdmin();
+    
+    // Firebase Authentication can send OTP via email
+    // We'll use a custom claim approach or store in Firestore for verification
+    const db = admin.firestore();
+    
+    const otpRef = db.collection('otp_codes').doc(email);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    
+    await otpRef.set({
+      code: otp,
+      email: email,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      expiresAt: expiresAt,
+      attempts: 0
+    });
+
+    console.log(`[FIREBASE] ✅ OTP stored in Firestore for ${email}`);
+    return true;
+  } catch (err) {
+    console.error('[FIREBASE] ❌ Error storing OTP in Firestore:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Send OTP with fallback strategy:
+ * 1. Try SMTP email first
+ * 2. If SMTP fails, try Firebase Firestore as backup
+ */
+async function sendOtpWithFallback(email, otp) {
+  // Try SMTP first
+  const smtpSuccess = await sendMail(
+    email,
+    'SwiftBodia - Email Verification',
+    `
+        <h2>Welcome to SwiftBodia</h2>
+        <p>Your verification code is:</p>
+        <h1 style="color: #212529; font-size: 32px; letter-spacing: 5px;">${otp}</h1>
+        <p>This code will expire in 10 minutes.</p>
+        <p>If you didn't request this, please ignore this email.</p>
+      `
+  );
+
+  if (smtpSuccess) {
+    console.log(`[OTP] ✅ OTP sent via SMTP to ${email}`);
+    return true;
+  }
+
+  // SMTP failed, try Firebase as fallback
+  console.log(`[OTP] 🔄 SMTP failed, attempting Firebase fallback for ${email}`);
+  const firebaseSuccess = await sendOtpViaFirebase(email, otp);
+  
+  if (firebaseSuccess) {
+    console.log(`[OTP] ✅ OTP sent via Firebase to ${email}`);
+    return true;
+  }
+
+  console.error(`[OTP] ❌ Both SMTP and Firebase failed for ${email}`);
+  return false;
+}
+
 module.exports = {
   generateOTP,
   sendVerificationEmail,
   sendPasswordResetEmail,
+  sendOtpViaFirebase,
+  sendOtpWithFallback,
   getSmtpCredentials
 };

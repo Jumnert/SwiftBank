@@ -2,7 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { query } = require('../db/database');
-const { generateOTP, sendVerificationEmail, sendPasswordResetEmail } = require('../utils/email');
+const { generateOTP, sendOtpWithFallback, sendPasswordResetEmail } = require('../utils/email');
 
 const router = express.Router();
 
@@ -33,8 +33,8 @@ router.post('/register', async (req, res) => {
 
     console.log(`[REGISTER] Attempting to send verification email to: ${email}`);
 
-    // Send verification email
-    const emailSent = await sendVerificationEmail(email, otp);
+    // Send verification email with fallback to Firebase
+    const emailSent = await sendOtpWithFallback(email, otp);
     
     console.log(`[REGISTER] Email send result: ${emailSent ? 'SUCCESS' : 'FAILED'}`);
     
@@ -180,8 +180,8 @@ router.post('/request-reset', async (req, res) => {
     const otp = generateOTP();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
 
-    // Send reset email
-    const emailSent = await sendPasswordResetEmail(email, otp);
+    // Send reset email with fallback to Firebase
+    const emailSent = await sendOtpWithFallback(email, otp);
     if (!emailSent) {
       return res.status(500).json({ error: 'Failed to send reset email' });
     }
