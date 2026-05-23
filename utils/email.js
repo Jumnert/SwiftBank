@@ -1,92 +1,100 @@
 const nodemailer = require('nodemailer');
 
-const MAX_RETRIES = 2;
+const SMTP_TIMEOUT_MS = 30000;
+const MAX_RETRIES = 3;
 
-/**
- * Email service using Ethereal Email (testing service)
- * Perfect for development - no credit card, no domain verification needed
- * 
- * In production, replace with:
- * - SendGrid
- * - Mailgun
- * - AWS SES
- * - Or any other service
- */
+/** Render docs use SMTP_*; local .env uses GMAIL_* — support both. */
+function getSmtpCredentials() {
+  const user = (process.env.GMAIL_USER || process.env.SMTP_USER || '').trim();
+  const pass = (process.env.GMAIL_PASSWORD || process.env.SMTP_PASS || '').trim();
+  return { user, pass };
+}
 
-let transporter = null;
-
-async function createTransporter() {
-  // For production, use real credentials from env
-  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-    console.log('[EMAIL] Using custom SMTP configuration');
-    return nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: process.env.SMTP_PORT || 587,
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-      }
-    });
+function createTransporter() {
+  const { user, pass } = getSmtpCredentials();
+  if (!user || !pass) {
+    return null;
   }
-
-  // For testing, create Ethereal account
-  console.log('[EMAIL] Creating Ethereal test account...');
-  const testAccount = await nodemailer.createTestAccount();
-  
-  console.log('[EMAIL] ✅ Ethereal account created');
-  console.log('[EMAIL] Email preview URL: https://ethereal.email/messages');
-  
   return nodemailer.createTransport({
-    host: 'smtp.ethereal.email',
-    port: 587,
-    secure: false,
-    auth: {
-      user: testAccount.user,
-      pass: testAccount.pass
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    auth: { user, pass },
+    connectionTimeout: SMTP_TIMEOUT_MS,
+    greetingTimeout: SMTP_TIMEOUT_MS,
+    socketTimeout: SMTP_TIMEOUT_MS,
+    pool: {
+      maxConnections: 1,
+      maxMessages: 10,
+      rateDelta: 1000,
+      rateLimit: 10
     }
   });
 }
 
-async function getTransporter() {
-  if (!transporter) {
-    transporter = await createTransporter();
+let transporter;
+
+function getTransporter() {
+  if (transporter === undefined) {
+    transporter = createTransporter();
   }
   return transporter;
 }
 
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    })
+  ]);
+}
+
 async function sendMail(to, subject, html, retryCount = 0) {
+  const { user } = getSmtpCredentials();
+  const transport = getTransporter();
+  
+  if (!transport) {
+    console.error(
+      'Email not configured: set GMAIL_USER and GMAIL_PASSWORD (or SMTP_USER and SMTP_PASS) in .env'
+    );
+    return false;
+  }
+
   try {
     console.log(`[EMAIL] Sending to ${to} (attempt ${retryCount + 1}/${MAX_RETRIES + 1})`);
     
-    const transport = await getTransporter();
-    
-    const info = await transport.sendMail({
-      from: 'SwiftBodia <noreply@swiftbodia.com>',
-      to: to,
-      subject: subject,
-      html: html
-    });
-
+    await withTimeout(
+      transport.sendMail({ from: user, to, subject, html }),
+      SMTP_TIMEOUT_MS,
+      'SMTP send'
+    );
     console.log(`[EMAIL] ✅ Email sent successfully to ${to}`);
-    console.log(`[EMAIL] Preview URL: ${nodemailer.getTestMessageUrl(info)}`);
     return true;
   } catch (err) {
     console.error(`[EMAIL] ❌ Error sending email to ${to} (attempt ${retryCount + 1}):`, err.message);
     
-    // Retry on network errors
-    const isRetryable = err.message.includes('ECONNREFUSED') ||
+    // Retry on network/timeout errors
+    const isRetryable = err.message.includes('timeout') || 
+      err.message.includes('ECONNREFUSED') ||
       err.message.includes('EHOSTUNREACH') ||
       err.message.includes('ETIMEDOUT') ||
-      err.message.includes('ENOTFOUND');
+      err.message.includes('ENOTFOUND') ||
+      err.message.includes('socket hang up');
     
     if (retryCount < MAX_RETRIES && isRetryable) {
-      const delayMs = Math.pow(2, retryCount) * 1000;
-      console.log(`[EMAIL] 🔄 Retrying in ${delayMs}ms...`);
+      const delayMs = Math.pow(2, retryCount) * 2000;
+      console.log(`[EMAIL] 🔄 Retrying in ${delayMs}ms... (${retryCount + 1}/${MAX_RETRIES})`);
       
-      transporter = null; // Reset on retry
+      transporter = undefined;
       await new Promise(resolve => setTimeout(resolve, delayMs));
       return sendMail(to, subject, html, retryCount + 1);
+    }
+    
+    if (err.message.includes('Invalid login') || err.message.includes('535')) {
+      console.error('[EMAIL] 🔐 AUTHENTICATION ERROR: Check GMAIL_USER and GMAIL_PASSWORD');
+      console.error('[EMAIL] Make sure you are using an App Password, not your regular Gmail password');
+      console.error('[EMAIL] Generate one at: https://myaccount.google.com/apppasswords');
     }
     
     return false;
@@ -104,7 +112,7 @@ const sendVerificationEmail = async (email, otp) => {
     `
         <h2>Welcome to SwiftBodia</h2>
         <p>Your verification code is:</p>
-        <h1 style="color: #2272C3; font-size: 32px; letter-spacing: 5px;">${otp}</h1>
+        <h1 style="color: #212529; font-size: 32px; letter-spacing: 5px;">${otp}</h1>
         <p>This code will expire in 10 minutes.</p>
         <p>If you didn't request this, please ignore this email.</p>
       `
@@ -118,7 +126,7 @@ const sendPasswordResetEmail = async (email, otp) => {
     `
         <h2>Password Reset Request</h2>
         <p>Your password reset code is:</p>
-        <h1 style="color: #2272C3; font-size: 32px; letter-spacing: 5px;">${otp}</h1>
+        <h1 style="color: #212529; font-size: 32px; letter-spacing: 5px;">${otp}</h1>
         <p>This code will expire in 10 minutes.</p>
         <p>If you didn't request this, please ignore this email.</p>
       `
@@ -128,5 +136,6 @@ const sendPasswordResetEmail = async (email, otp) => {
 module.exports = {
   generateOTP,
   sendVerificationEmail,
-  sendPasswordResetEmail
+  sendPasswordResetEmail,
+  getSmtpCredentials
 };
