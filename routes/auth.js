@@ -27,30 +27,34 @@ router.post('/register', async (req, res) => {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Generate OTP
-    const otp = generateOTP();
-    const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    console.log(`[REGISTER] Creating account for: ${email}`);
 
-    console.log(`[REGISTER] Attempting to send verification email to: ${email}`);
+    // Create user directly with $200 starting balance (no OTP verification)
+    const result = await query(
+      'INSERT INTO users (email, password, name, is_verified, balance) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, name, balance',
+      [email, hashedPassword, name, true, 200.00]
+    );
 
-    // Send verification email with fallback to Firebase
-    const emailSent = await sendOtpWithFallback(email, otp);
-    
-    console.log(`[REGISTER] Email send result: ${emailSent ? 'SUCCESS' : 'FAILED'}`);
-    
-    if (!emailSent) {
-      console.error(`[REGISTER] Failed to send verification email to ${email}`);
-      return res.status(500).json({ error: 'Failed to send verification email' });
-    }
+    const user = result.rows[0];
 
-    // Store OTP temporarily
-    otpStore.set(email, { otp, expires: otpExpires, password: hashedPassword, name });
+    // Generate JWT
+    const token = jwt.sign(
+      { userId: user.id, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
 
-    console.log(`[REGISTER] OTP stored for ${email}, waiting for verification`);
+    console.log(`[REGISTER] ✅ Account created successfully for ${email}`);
 
     res.json({
-      message: 'Verification code sent to your email',
-      email: email
+      message: 'Registration successful',
+      token,
+      user: {
+        id: String(user.id),
+        email: user.email,
+        name: user.name,
+        balance: Number(user.balance ?? 200)
+      }
     });
   } catch (err) {
     console.error('Register error:', err);
@@ -58,7 +62,7 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// Verify Email OTP
+// Verify Email OTP (kept for backward compatibility but not used)
 router.post('/verify-email', async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -110,6 +114,44 @@ router.post('/verify-email', async (req, res) => {
   } catch (err) {
     console.error('Verify email error:', err);
     res.status(500).json({ error: 'Verification failed' });
+  }
+});
+
+// Change Password (requires old password - no OTP)
+router.post('/change-password', async (req, res) => {
+  try {
+    const { email, oldPassword, newPassword } = req.body;
+
+    if (!email || !oldPassword || !newPassword) {
+      return res.status(400).json({ error: 'Email, old password, and new password are required' });
+    }
+
+    // Get user
+    const result = await query('SELECT * FROM users WHERE email = $1', [email]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = result.rows[0];
+
+    // Verify old password
+    const passwordMatch = await bcrypt.compare(oldPassword, user.password);
+    if (!passwordMatch) {
+      return res.status(401).json({ error: 'Incorrect old password' });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update password
+    await query('UPDATE users SET password = $1 WHERE email = $2', [hashedPassword, email]);
+
+    console.log(`[CHANGE_PASSWORD] ✅ Password changed successfully for ${email}`);
+
+    res.json({ message: 'Password changed successfully' });
+  } catch (err) {
+    console.error('Change password error:', err);
+    res.status(500).json({ error: 'Password change failed' });
   }
 });
 

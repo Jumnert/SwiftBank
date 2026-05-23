@@ -173,7 +173,7 @@ async function sendOtpViaFirebase(email, otp) {
 /**
  * Send OTP with fallback strategy:
  * 1. Try SMTP email first
- * 2. If SMTP fails, store in memory and log for manual retrieval
+ * 2. If SMTP fails, try Firebase Firestore as backup
  */
 async function sendOtpWithFallback(email, otp) {
   // Try SMTP first
@@ -194,14 +194,17 @@ async function sendOtpWithFallback(email, otp) {
     return true;
   }
 
-  // SMTP failed - log OTP for manual retrieval (development fallback)
-  console.log(`[OTP] ⚠️  SMTP failed for ${email}`);
-  console.log(`[OTP] 📧 Manual OTP for ${email}: ${otp}`);
-  console.log(`[OTP] ⏰ Valid for 10 minutes`);
+  // SMTP failed, try Firebase as fallback
+  console.log(`[OTP] 🔄 SMTP failed, attempting Firebase fallback for ${email}`);
+  const firebaseSuccess = await sendOtpViaFirebase(email, otp);
   
-  // Still return true so registration can proceed
-  // OTP is stored in memory (otpStore) in auth.js
-  return true;
+  if (firebaseSuccess) {
+    console.log(`[OTP] ✅ OTP sent via Firebase to ${email}`);
+    return true;
+  }
+
+  console.error(`[OTP] ❌ Both SMTP and Firebase failed for ${email}`);
+  return false;
 }
 
 module.exports = {
