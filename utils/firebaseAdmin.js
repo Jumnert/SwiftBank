@@ -13,7 +13,15 @@ function initializeFirebaseAdmin() {
     const projectId = process.env.FIREBASE_PROJECT_ID || 'swiftbodia';
 
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      let serviceAccountStr = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
+      
+      // Remove outer quotes if present (Render sometimes adds them)
+      if ((serviceAccountStr.startsWith('"') && serviceAccountStr.endsWith('"')) ||
+          (serviceAccountStr.startsWith("'") && serviceAccountStr.endsWith("'"))) {
+        serviceAccountStr = serviceAccountStr.slice(1, -1);
+      }
+      
+      const serviceAccount = JSON.parse(serviceAccountStr);
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
         projectId: serviceAccount.project_id || projectId
