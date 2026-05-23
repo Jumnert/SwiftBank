@@ -292,8 +292,8 @@ router.post('/transfer', verifyToken, async (req, res) => {
         data: {
           type: 'payment_received',
           amount: amount.toString(),
-          from: sender.email,
-          fromName: sender.name || sender.email
+          senderEmail: sender.email,
+          senderName: sender.name || sender.email
         }
       }).catch((err) => console.error('Recipient push failed:', err.message));
     } else {
@@ -307,8 +307,8 @@ router.post('/transfer', verifyToken, async (req, res) => {
         data: {
           type: 'payment_sent',
           amount: amount.toString(),
-          to: recipient.email,
-          toName: recipient.name || recipient.email
+          recipientEmail: recipient.email,
+          recipientName: recipient.name || recipient.email
         }
       }).catch((err) => console.error('Sender push failed:', err.message));
     }
