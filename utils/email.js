@@ -1,7 +1,8 @@
 const nodemailer = require('nodemailer');
 
-const SMTP_TIMEOUT_MS = 15000;
-const MAX_RETRIES = 2;
+// Increased timeouts for Render's network conditions
+const SMTP_TIMEOUT_MS = 30000; // 30 seconds (was 15)
+const MAX_RETRIES = 3; // More retries for flaky connections
 
 /** Render docs use SMTP_*; local .env uses GMAIL_* — support both. */
 function getSmtpCredentials() {
@@ -16,16 +17,18 @@ function createTransporter() {
     return null;
   }
   return nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 465, // SSL port (was 587 TLS)
+    secure: true, // Use SSL
     auth: { user, pass },
     connectionTimeout: SMTP_TIMEOUT_MS,
     greetingTimeout: SMTP_TIMEOUT_MS,
     socketTimeout: SMTP_TIMEOUT_MS,
     pool: {
       maxConnections: 1,
-      maxMessages: 5,
-      rateDelta: 2000,
-      rateLimit: 5
+      maxMessages: 10,
+      rateDelta: 1000,
+      rateLimit: 10
     }
   });
 }
@@ -73,16 +76,20 @@ async function sendMail(to, subject, html, retryCount = 0) {
     console.error(`[EMAIL] ❌ Error sending email to ${to} (attempt ${retryCount + 1}):`, err.message);
     
     // Retry on network/timeout errors
-    if (retryCount < MAX_RETRIES && (
-      err.message.includes('timeout') || 
+    const isRetryable = err.message.includes('timeout') || 
       err.message.includes('ECONNREFUSED') ||
       err.message.includes('EHOSTUNREACH') ||
-      err.message.includes('ETIMEDOUT')
-    )) {
-      console.log(`[EMAIL] 🔄 Retrying email send to ${to}...`);
+      err.message.includes('ETIMEDOUT') ||
+      err.message.includes('ENOTFOUND') ||
+      err.message.includes('socket hang up');
+    
+    if (retryCount < MAX_RETRIES && isRetryable) {
+      const delayMs = Math.pow(2, retryCount) * 2000; // Exponential backoff: 2s, 4s, 8s
+      console.log(`[EMAIL] 🔄 Retrying in ${delayMs}ms... (${retryCount + 1}/${MAX_RETRIES})`);
+      
       // Reset transporter on retry
       transporter = undefined;
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, delayMs));
       return sendMail(to, subject, html, retryCount + 1);
     }
     
