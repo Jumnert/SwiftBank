@@ -1,19 +1,16 @@
 require('dotenv').config();
-const nodemailer = require('nodemailer');
-const { getSmtpCredentials, sendVerificationEmail } = require('./utils/email');
+const { getResendApiKey, sendVerificationEmail } = require('./utils/email');
 
-const { user, pass } = getSmtpCredentials();
+const apiKey = getResendApiKey();
 
-console.log('\n=== GMAIL SMTP TEST ===\n');
-console.log('Credentials Check:');
-console.log('✓ User:', user || '❌ NOT SET');
-console.log('✓ Password length:', pass ? `${pass.length} chars` : '❌ NOT SET');
+console.log('\n=== RESEND EMAIL TEST ===\n');
+console.log('API Key Check:');
+console.log('✓ API Key:', apiKey ? `${apiKey.substring(0, 10)}...` : '❌ NOT SET');
 
-if (!user || !pass) {
-  console.error('\n❌ Missing credentials. Set in .env:');
-  console.error('   GMAIL_USER=your_email@gmail.com');
-  console.error('   GMAIL_PASSWORD=your_16_char_app_password');
-  console.error('\nOr use SMTP_USER and SMTP_PASS aliases.');
+if (!apiKey) {
+  console.error('\n❌ Missing API key. Set in .env:');
+  console.error('   RESEND_API_KEY=re_xxxxx');
+  console.error('\nGet your key from: https://resend.com/api-keys');
   process.exit(1);
 }
 
